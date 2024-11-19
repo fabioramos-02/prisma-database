@@ -8,17 +8,19 @@ import prisma from "../../lib/PrismaClient";
  *     description: Operações relacionadas às contas
  */
 
-// Helper para tratar erros e responder consistentemente
+// Helper para lidar com erros
 const handleError = (error: any, message: string, status = 500) => {
   console.error(message, error);
   return NextResponse.json({ error: message }, { status });
 };
+
 /**
  * @swagger
  * /api/contas:
  *   post:
  *     summary: Cria uma nova conta
- *     tags: [Contas]
+ *     tags:
+ *       - Contas
  *     description: Adiciona uma nova conta ao banco de dados.
  *     requestBody:
  *       required: true
@@ -29,27 +31,27 @@ const handleError = (error: any, message: string, status = 500) => {
  *             properties:
  *               usuarioId:
  *                 type: integer
- *                 description: ID do usuário associado à conta
+ *                 description: "ID do usuário associado à conta"
  *                 example: 1
  *               tipoDeConta:
  *                 type: string
- *                 description: Tipo da conta (ex: Corrente, Poupança)
+ *                 description: "Tipo da conta (ex: Corrente, Poupança)"
  *                 example: "Corrente"
  *               saldo:
  *                 type: number
- *                 description: Saldo inicial da conta
+ *                 description: "Saldo inicial da conta"
  *                 example: 1000.00
  *               nomeInstituicao:
  *                 type: string
- *                 description: Nome da instituição bancária
+ *                 description: "Nome da instituição bancária"
  *                 example: "Banco do Brasil"
  *     responses:
- *       200:
- *         description: Conta criada com sucesso
+ *       201:
+ *         description: "Conta criada com sucesso"
  *       400:
- *         description: Dados incompletos para criar conta
+ *         description: "Dados incompletos para criar conta"
  *       500:
- *         description: Erro ao criar conta
+ *         description: "Erro ao criar conta"
  */
 export async function POST(request: Request) {
   try {
@@ -70,13 +72,9 @@ export async function POST(request: Request) {
       data: { usuarioId, tipoDeConta, saldo, nomeInstituicao },
     });
 
-    return NextResponse.json(novaConta, { status: 200 });
+    return NextResponse.json(novaConta, { status: 201 });
   } catch (error) {
-    console.error("Erro ao criar conta:", error);
-    return NextResponse.json(
-      { error: "Erro interno no servidor." },
-      { status: 500 }
-    );
+    return handleError(error, "Erro ao criar conta.");
   }
 }
 
@@ -242,4 +240,3 @@ export async function DELETE(request: Request) {
     );
   }
 }
-
