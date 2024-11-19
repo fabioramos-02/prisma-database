@@ -190,30 +190,35 @@ export async function POST(request: Request) {
     }
 
     const { contaId, valor, tipoDeTransacao, dataTransacao, descricao } = dados;
-    const ajusteSaldo = tipoDeTransacao === "ENTRADA" ? valor : -valor;
 
+    // Verifica se a conta existe antes de criar a transação
     const conta = await prisma.conta.findUnique({ where: { id: contaId } });
     if (!conta) {
-      return NextResponse.json({ error: "Conta não encontrada" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Conta não encontrada" },
+        { status: 400 }
+      );
     }
 
+    // Criação da transação no banco
     const novaTransacao = await prisma.transacao.create({
       data: {
         contaId,
         valor,
-        tipoDeTransacao,
         dataTransacao: new Date(dataTransacao),
         descricao,
+        tipoDeTransacao,
       },
     });
 
-    await ajustarSaldoConta(contaId, ajusteSaldo);
-   
-
+    // Retorna a transação criada
     return NextResponse.json(novaTransacao, { status: 200 });
   } catch (error) {
     console.error("Erro ao criar transação:", error);
-    return NextResponse.json({ error: "Erro ao criar transação" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Erro ao criar transação" },
+      { status: 500 }
+    );
   }
 }
 
