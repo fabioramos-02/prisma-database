@@ -245,7 +245,7 @@ export async function PUT(request: Request) {
  *       404:
  *         description: ID do usuário não fornecido
  *       500:
- *         description: Erro ao remover usuário
+ *         description: Usuário não encontrado
  */
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -269,7 +269,7 @@ export async function DELETE(request: Request) {
     );
   } catch (error) {
     return NextResponse.json(
-      { error: "Erro ao remover usuário" },
+      { error: "Usuário não encontrado" },
       { status: 500 }
     );
   }

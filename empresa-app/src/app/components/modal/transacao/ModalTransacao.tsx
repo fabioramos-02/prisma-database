@@ -34,7 +34,9 @@ export default function TransacoesModal({
     data: "",
     contaId: "",
   });
-  const [contas, setContas] = useState<{ id: number; tipoDeConta: string }[]>(
+  const [contas, setContas] = useState<{
+    nomeInstituicao: ReactNode; id: number; tipoDeConta: string 
+}[]>(
     []
   );
   const [notification, setNotification] = useState<{
