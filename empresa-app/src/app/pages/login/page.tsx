@@ -75,7 +75,7 @@ export default function LoginPage() {
         </form>
         <p className="registerText">
           Não tem uma conta?{" "}
-          <Link href="/usuarios/register" className="registerLink">
+          <Link href="/pages/usuarios/register" className="registerLink">
             Cadastre-se
           </Link>
         </p>
