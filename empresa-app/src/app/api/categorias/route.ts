@@ -27,7 +27,7 @@ import prisma from "../../lib/PrismaClient";
  *                 description: Nome da categoria de transação
  *                 example: "Alimentação"
  *     responses:
- *       201:
+ *       200:
  *         description: Categoria criada com sucesso
  *       400:
  *         description: Nome da categoria é obrigatório ou já existe
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json(novaCategoria, { status: 201 });
+    return NextResponse.json(novaCategoria, { status: 200 });
   } catch (error) {
     return NextResponse.json(
       { error: "Erro ao criar categoria" },
@@ -221,59 +221,3 @@ export async function DELETE(request: Request) {
   }
 }
 
-/**
- * @swagger
- * /api/categorias/associar:
- *   post:
- *     summary: Associa uma transação a uma categoria
- *     tags: [Categorias]
- *     description: Associa uma transação existente a uma categoria específica.
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               transacaoId:
- *                 type: integer
- *                 description: ID da transação
- *                 example: 1
- *               categoriaId:
- *                 type: integer
- *                 description: ID da categoria
- *                 example: 1
- *     responses:
- *       200:
- *         description: Associação criada com sucesso
- *       400:
- *         description: Dados incompletos
- *       500:
- *         description: Erro ao associar transação à categoria
- */
-export async function associarTransacao(request: Request) {
-  try {
-    const { transacaoId, categoriaId } = await request.json();
-
-    if (!transacaoId || !categoriaId) {
-      return NextResponse.json(
-        { error: "transacaoId e categoriaId são obrigatórios" },
-        { status: 400 }
-      );
-    }
-
-    const associacao = await prisma.transacaoParaCategoria.create({
-      data: {
-        transacaoId,
-        categoriaId,
-      },
-    });
-
-    return NextResponse.json(associacao, { status: 200 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Erro ao associar transação à categoria" },
-      { status: 500 }
-    );
-  }
-}

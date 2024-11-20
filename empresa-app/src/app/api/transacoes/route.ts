@@ -1,32 +1,34 @@
 import { NextResponse } from "next/server";
 import prisma from "../../lib/PrismaClient";
-
-// Função auxiliar para validar entrada de dados
-const validarDadosTransacao = (dados: any, isUpdate = false) => {
+// Função para validar os dados de entrada de uma transação
+const validarDadosTransacao = (dados: any, isUpdate = false): boolean => {
   const { contaId, valor, tipoDeTransacao, dataTransacao, descricao } = dados;
 
   if (isUpdate) {
     // Validação flexível para atualizações
-    if (valor === undefined && !dataTransacao && !descricao) {
-      return false;
-    }
-  } else {
-    // Validação completa para criação
-    if (
-      !contaId ||
-      valor === undefined ||
-      !tipoDeTransacao ||
-      !dataTransacao ||
-      !descricao
-    ) {
-      return false;
-    }
+    return (
+      valor !== undefined ||
+      dataTransacao !== undefined ||
+      descricao !== undefined
+    );
   }
 
-  return true;
+  // Validação completa para criação
+  return (
+    contaId &&
+    typeof contaId === "number" &&
+    valor !== undefined &&
+    typeof valor === "number" &&
+    tipoDeTransacao &&
+    ["ENTRADA", "SAIDA"].includes(tipoDeTransacao) &&
+    dataTransacao &&
+    !isNaN(new Date(dataTransacao).getTime()) &&
+    descricao &&
+    typeof descricao === "string"
+  );
 };
 
-// Função auxiliar para ajustar saldo da conta
+// Função para ajustar o saldo de uma conta
 const ajustarSaldoConta = async (contaId: number, valor: number) => {
   await prisma.conta.update({
     where: { id: contaId },
@@ -34,7 +36,13 @@ const ajustarSaldoConta = async (contaId: number, valor: number) => {
   });
 };
 
+// verificar se o saldo da conta é suficiente para a transação
+const verificarSaldoConta = async (contaId: number, valor: number) => {
+  const conta = await prisma.conta.findUnique({ where: { id: contaId } });
+  if (!conta) return false;
 
+  return Number(conta.saldo) + valor >= 0;
+};
 
 /**
  * @swagger
@@ -121,16 +129,33 @@ const ajustarSaldoConta = async (contaId: number, valor: number) => {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+
+    const filtros: any = {};
     const tipoDeTransacao = searchParams.get("tipoDeTransacao");
     const contaId = searchParams.get("contaId");
 
-    const filtros: any = {};
-    if (tipoDeTransacao) filtros.tipoDeTransacao = tipoDeTransacao;
-    if (contaId) filtros.contaId = Number(contaId);
+    if (tipoDeTransacao) {
+      filtros.tipoDeTransacao = tipoDeTransacao;
+    }
 
+    if (contaId) {
+      const parsedContaId = parseInt(contaId, 10);
+      if (!isNaN(parsedContaId)) {
+        filtros.contaId = parsedContaId;
+      }
+    }
+
+    // Consultar transações com categorias
     const transacoes = await prisma.transacao.findMany({
       where: filtros,
-      orderBy: { id: "asc" },
+      include: {
+        categorias: {
+          include: {
+            categoria: true, // Inclui informações detalhadas da categoria
+          },
+        },
+      },
+      orderBy: { id: "asc" }, // Ordenação por ID crescente
     });
 
     return NextResponse.json(transacoes, { status: 200 });
@@ -148,8 +173,7 @@ export async function GET(request: Request) {
  * /api/transacoes:
  *   post:
  *     summary: Cria uma nova transação
- *     tags:
- *       - Transações
+ *     tags: [Transações]
  *     description: Adiciona uma nova transação ao banco de dados.
  *     requestBody:
  *       required: true
@@ -170,18 +194,24 @@ export async function GET(request: Request) {
  *                 format: date-time
  *               descricao:
  *                 type: string
+ *               categorias:
+ *                 type: array
+ *                 items:
+ *                   type: integer
  *     responses:
  *       200:
  *         description: Transação criada com sucesso.
  *       400:
- *         description: Dados incompletos para criar transação.
+ *         description: Dados incompletos ou inválidos.
  *       500:
- *         description: Erro interno ao criar transação.
+ *         description: Erro interno ao criar a transação.
  */
+
 export async function POST(request: Request) {
   try {
     const dados = await request.json();
 
+    // Valida os dados da transação
     if (!validarDadosTransacao(dados)) {
       return NextResponse.json(
         { error: "Dados incompletos para criar transação" },
@@ -189,18 +219,34 @@ export async function POST(request: Request) {
       );
     }
 
-    const { contaId, valor, tipoDeTransacao, dataTransacao, descricao } = dados;
+    const { contaId, valor, tipoDeTransacao, dataTransacao, descricao, categorias } = dados;
 
-    // Verifica se a conta existe antes de criar a transação
+    // Verifica se a conta existe
     const conta = await prisma.conta.findUnique({ where: { id: contaId } });
     if (!conta) {
-      return NextResponse.json(
-        { error: "Conta não encontrada" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Conta não encontrada" }, { status: 400 });
     }
 
-    // Criação da transação no banco
+    // Verifica se o saldo é suficiente para transações de saída
+    if (tipoDeTransacao === "SAIDA" && !(await verificarSaldoConta(contaId, -valor))) {
+      return NextResponse.json({ error: "Saldo insuficiente" }, { status: 400 });
+    }
+
+    // Valida as categorias
+    if (categorias && Array.isArray(categorias)) {
+      const categoriasExistentes = await prisma.categoriaDeTransacao.findMany({
+        where: { id: { in: categorias } },
+      });
+
+      if (categoriasExistentes.length !== categorias.length) {
+        return NextResponse.json(
+          { error: "Uma ou mais categorias fornecidas não existem" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Cria a transação
     const novaTransacao = await prisma.transacao.create({
       data: {
         contaId,
@@ -211,25 +257,39 @@ export async function POST(request: Request) {
       },
     });
 
-    // Retorna a transação criada
+    // Cria as associações com categorias
+    if (categorias && Array.isArray(categorias)) {
+      const categoriasData = categorias.map((categoriaId: number) => ({
+        transacaoId: novaTransacao.id,
+        categoriaId,
+      }));
+
+      await prisma.transacaoParaCategoria.createMany({
+        data: categoriasData,
+      });
+    }
+
+    // Ajusta o saldo da conta
+    const ajusteSaldo = tipoDeTransacao === "ENTRADA" ? valor : -valor;
+    await ajustarSaldoConta(contaId, ajusteSaldo);
+
     return NextResponse.json(novaTransacao, { status: 200 });
   } catch (error) {
     console.error("Erro ao criar transação:", error);
     return NextResponse.json(
-      { error: "Erro ao criar transação" },
+      { error: "Erro interno ao criar transação" },
       { status: 500 }
     );
   }
 }
 
-// Atualização de uma transação
+
 /**
  * @swagger
  * /api/transacoes?id={id}:
  *   put:
  *     summary: Atualiza uma transação
- *     tags:
- *       - Transações
+ *     tags: [Transações]
  *     description: Atualiza as informações de uma transação específica no banco de dados.
  *     parameters:
  *       - name: id
@@ -248,115 +308,67 @@ export async function POST(request: Request) {
  *               valor:
  *                 type: number
  *                 description: Novo valor da transação
- *                 example: 150.00
  *               tipoDeTransacao:
  *                 type: string
  *                 enum: [ENTRADA, SAIDA]
- *                 description: Tipo da transação (ENTRADA ou SAIDA)
- *                 example: "ENTRADA"
  *               dataTransacao:
  *                 type: string
  *                 format: date-time
  *                 description: Nova data da transação
- *                 example: "2024-11-18T10:30:00.000Z"
  *               descricao:
  *                 type: string
  *                 description: Nova descrição da transação
- *                 example: "Pagamento de serviços"
+ *               categorias:
+ *                 type: array
+ *                 items:
+ *                   type: integer
  *     responses:
  *       200:
  *         description: Transação atualizada com sucesso
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 id:
- *                   type: integer
- *                   description: ID da transação atualizada
- *                   example: 1
- *                 contaId:
- *                   type: integer
- *                   description: ID da conta vinculada
- *                   example: 3
- *                 valor:
- *                   type: number
- *                   description: Valor atualizado da transação
- *                   example: 150.00
- *                 tipoDeTransacao:
- *                   type: string
- *                   description: Tipo atualizado da transação
- *                   example: "ENTRADA"
- *                 descricao:
- *                   type: string
- *                   description: Nova descrição da transação
- *                   example: "Pagamento de serviços"
- *                 dataTransacao:
- *                   type: string
- *                   format: date-time
- *                   description: Data atualizada da transação
- *                   example: "2024-11-18T10:30:00.000Z"
- *                 criadoEm:
- *                   type: string
- *                   format: date-time
- *                   description: Data e hora de criação da transação
- *                   example: "2024-11-15T10:00:00.000Z"
  *       400:
- *         description: ID da transação não fornecido ou dados inválidos
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   description: Mensagem de erro detalhada
- *                   example: "ID da transação não fornecido"
+ *         description: Dados incompletos ou inválidos
  *       404:
  *         description: Transação não encontrada
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   description: Mensagem de erro
- *                   example: "Transação não encontrada"
  *       500:
  *         description: Erro interno ao atualizar transação
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   description: Mensagem de erro
- *                   example: "Erro ao atualizar transação"
  */
 
 export async function PUT(request: Request) {
   try {
+    // Obtém o ID da transação dos parâmetros da URL
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
     if (!id) {
-      return NextResponse.json({ error: "ID da transação não fornecido" }, { status: 400 });
+      return NextResponse.json(
+        { error: "ID da transação não fornecido" },
+        { status: 400 }
+      );
     }
 
+    // Obtém os dados da requisição
     const dados = await request.json();
     if (!validarDadosTransacao(dados, true)) {
-      return NextResponse.json({ error: "Dados incompletos ou inválidos" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Dados incompletos ou inválidos para atualização" },
+        { status: 400 }
+      );
     }
 
+    // Busca a transação existente
     const transacaoAntiga = await prisma.transacao.findUnique({
       where: { id: Number(id) },
+      include: { categorias: true }, // Inclui categorias associadas
     });
+
     if (!transacaoAntiga) {
-      return NextResponse.json({ error: "Transação não encontrada" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Transação não encontrada" },
+        { status: 404 }
+      );
     }
 
+    // Ajuste do saldo da conta (remove o saldo antigo e aplica o novo)
     const ajusteSaldoAntigo =
       transacaoAntiga.tipoDeTransacao === "ENTRADA"
         ? -transacaoAntiga.valor
@@ -364,29 +376,59 @@ export async function PUT(request: Request) {
     const ajusteSaldoNovo =
       dados.tipoDeTransacao === "ENTRADA" ? dados.valor : -dados.valor;
 
+    // Verifica se o saldo é suficiente caso o tipo seja SAÍDA
+    if (
+      dados.tipoDeTransacao === "SAIDA" &&
+      !(await verificarSaldoConta(transacaoAntiga.contaId, ajusteSaldoNovo))
+    ) {
+      return NextResponse.json(
+        { error: "Saldo insuficiente para a transação" },
+        { status: 400 }
+      );
+    }
+
+    // Atualiza os dados da transação
     const transacaoAtualizada = await prisma.transacao.update({
       where: { id: Number(id) },
-      data: { ...dados, dataTransacao: new Date(dados.dataTransacao) },
+      data: {
+        valor: dados.valor,
+        tipoDeTransacao: dados.tipoDeTransacao,
+        dataTransacao: new Date(dados.dataTransacao),
+        descricao: dados.descricao,
+      },
     });
 
+    if (dados.categorias && Array.isArray(dados.categorias)) {
+      const categoriasData = dados.categorias.map((categoriaId: number) => ({
+        transacaoId: dados.novaTransacao.id,
+        categoriaId,
+      }));
+    
+      await prisma.transacaoParaCategoria.createMany({
+        data: categoriasData,
+      });
+    }
+
+    // Ajusta o saldo da conta
     await ajustarSaldoConta(
       transacaoAntiga.contaId,
       ajusteSaldoAntigo + ajusteSaldoNovo
     );
-   
 
     return NextResponse.json(transacaoAtualizada, { status: 200 });
   } catch (error) {
     console.error("Erro ao atualizar transação:", error);
-    return NextResponse.json({ error: "Erro ao atualizar transação" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Erro interno ao atualizar transação" },
+      { status: 500 }
+    );
   }
 }
-
 
 // Exclusão de uma transação
 /**
  * @swagger
- * /api/transacoes?id={id}:
+ * /api/transacoes:
  *   delete:
  *     summary: Remove uma transação
  *     tags: [Transações]
@@ -402,20 +444,18 @@ export async function PUT(request: Request) {
  *       200:
  *         description: Transação removida com sucesso
  *       400:
- *         description: ID da transação não fornecido
+ *         description: ID da transação não fornecido ou inválido
  *       404:
  *         description: Transação não encontrada
  *       500:
  *         description: Erro ao remover transação
  */
-
-
-// Exclusão de uma transação
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
+    // Verifica se o ID é válido
     if (!id || isNaN(Number(id))) {
       return NextResponse.json(
         { error: "ID da transação inválido ou não fornecido" },
@@ -423,11 +463,17 @@ export async function DELETE(request: Request) {
       );
     }
 
+    const transacaoId = Number(id);
+
+    // Busca a transação e suas categorias relacionadas
     const transacao = await prisma.transacao.findUnique({
-      where: { id: Number(id) },
-      include: { logs: true },
+      where: { id: transacaoId },
+      include: {
+        categorias: true, // Inclui as categorias relacionadas
+      },
     });
 
+    // Verifica se a transação existe
     if (!transacao) {
       return NextResponse.json(
         { error: "Transação não encontrada" },
@@ -435,22 +481,29 @@ export async function DELETE(request: Request) {
       );
     }
 
+    // Calcula o ajuste no saldo com base no tipo de transação
     const ajusteSaldo =
       transacao.tipoDeTransacao === "ENTRADA"
-        ? -transacao.valor
-        : transacao.valor;
+        ? -Number(transacao.valor)
+        : Number(transacao.valor);
 
-    // Remover logs relacionados, se necessário
-    await prisma.transacaoLog.deleteMany({
-      where: { transacaoId: Number(id) },
+    // Remove categorias associadas na tabela intermediária
+    await prisma.transacaoParaCategoria.deleteMany({
+      where: { transacaoId },
     });
 
-    // Remover a transação
-    await prisma.transacao.delete({ where: { id: Number(id) } });
+    // Remove a transação
+    await prisma.transacao.delete({
+      where: { id: transacaoId },
+    });
 
-    // Ajustar saldo da conta
-    await ajustarSaldoConta(transacao.contaId, Number(ajusteSaldo));
+    // Ajusta o saldo da conta
+    await prisma.conta.update({
+      where: { id: transacao.contaId },
+      data: { saldo: { increment: ajusteSaldo } },
+    });
 
+    // Retorna uma mensagem de sucesso
     return NextResponse.json(
       { message: "Transação removida com sucesso" },
       { status: 200 }

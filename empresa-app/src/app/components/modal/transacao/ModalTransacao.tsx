@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import {
   Box,
   TextField,
@@ -11,6 +11,7 @@ import {
   Select,
   InputLabel,
   FormControl,
+  SelectChangeEvent,
 } from "@mui/material";
 
 interface ModalProps {
@@ -67,11 +68,11 @@ export default function TransacoesModal({
 
   // Atualiza valores do formulário
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }>
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name!]: value as string }));
-  };
+      e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }> | SelectChangeEvent<string>
+    ) => {
+      const { name, value } = e.target;
+      setFormData((prev) => ({ ...prev, [name!]: value as string }));
+    };
 
   // Submete a transação
   const handleSubmit = async (e: React.FormEvent) => {
