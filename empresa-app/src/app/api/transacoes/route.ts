@@ -1,19 +1,30 @@
 import { NextResponse } from "next/server";
 import prisma from "../../lib/PrismaClient";
-// Função para validar os dados de entrada de uma transação
+
+// Função para ajustar o saldo de uma conta (para o caso de uma transação ser excluída)
+const ajustarSaldoConta = async (contaId: number, valor: number) => {
+  await prisma.conta.update({
+    where: { id: contaId },
+    data: { saldo: { increment: valor } }, // Decrementa ou incrementa o saldo conforme o tipo de transação
+  });
+};
+
+// Verificar se o saldo da conta é suficiente para a transação
+const verificarSaldoConta = async (contaId: number, valor: number) => {
+  const conta = await prisma.conta.findUnique({ where: { id: contaId } });
+  if (!conta) return false;
+
+  return Number(conta.saldo) + valor >= 0;
+};
+
+// Validação dos dados da transação
 const validarDadosTransacao = (dados: any, isUpdate = false): boolean => {
   const { contaId, valor, tipoDeTransacao, dataTransacao, descricao } = dados;
 
   if (isUpdate) {
-    // Validação flexível para atualizações
-    return (
-      valor !== undefined ||
-      dataTransacao !== undefined ||
-      descricao !== undefined
-    );
+    return valor !== undefined || dataTransacao !== undefined || descricao !== undefined;
   }
 
-  // Validação completa para criação
   return (
     contaId &&
     typeof contaId === "number" &&
@@ -26,22 +37,6 @@ const validarDadosTransacao = (dados: any, isUpdate = false): boolean => {
     descricao &&
     typeof descricao === "string"
   );
-};
-
-// Função para ajustar o saldo de uma conta
-const ajustarSaldoConta = async (contaId: number, valor: number) => {
-  await prisma.conta.update({
-    where: { id: contaId },
-    data: { saldo: { increment: valor } },
-  });
-};
-
-// verificar se o saldo da conta é suficiente para a transação
-const verificarSaldoConta = async (contaId: number, valor: number) => {
-  const conta = await prisma.conta.findUnique({ where: { id: contaId } });
-  if (!conta) return false;
-
-  return Number(conta.saldo) + valor >= 0;
 };
 
 /**
@@ -126,6 +121,7 @@ const verificarSaldoConta = async (contaId: number, valor: number) => {
  *                   description: Mensagem de erro.
  *                   example: "Erro ao buscar transações"
  */
+// Listagem de todas as transações
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -149,7 +145,7 @@ export async function GET(request: Request) {
     const transacoes = await prisma.transacao.findMany({
       where: filtros,
       include: {
-        categorias: {
+        transacoes_para_categorias: {
           include: {
             categoria: true, // Inclui informações detalhadas da categoria
           },
@@ -167,6 +163,7 @@ export async function GET(request: Request) {
     );
   }
 }
+
 
 /**
  * @swagger
@@ -207,11 +204,13 @@ export async function GET(request: Request) {
  *         description: Erro interno ao criar a transação.
  */
 
+// Função de POST para criar transação
 export async function POST(request: Request) {
   try {
     const dados = await request.json();
+    console.log("Dados recebidos:", dados);
 
-    // Valida os dados da transação
+    // Validação inicial dos dados
     if (!validarDadosTransacao(dados)) {
       return NextResponse.json(
         { error: "Dados incompletos para criar transação" },
@@ -227,26 +226,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Conta não encontrada" }, { status: 400 });
     }
 
-    // Verifica se o saldo é suficiente para transações de saída
+    // Verifica saldo suficiente para transações do tipo SAÍDA
     if (tipoDeTransacao === "SAIDA" && !(await verificarSaldoConta(contaId, -valor))) {
       return NextResponse.json({ error: "Saldo insuficiente" }, { status: 400 });
     }
 
-    // Valida as categorias
-    if (categorias && Array.isArray(categorias)) {
-      const categoriasExistentes = await prisma.categoriaDeTransacao.findMany({
-        where: { id: { in: categorias } },
-      });
-
-      if (categoriasExistentes.length !== categorias.length) {
-        return NextResponse.json(
-          { error: "Uma ou mais categorias fornecidas não existem" },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Cria a transação
+    // Cria a transação no banco de dados
     const novaTransacao = await prisma.transacao.create({
       data: {
         contaId,
@@ -257,20 +242,24 @@ export async function POST(request: Request) {
       },
     });
 
-    // Cria as associações com categorias
-    if (categorias && Array.isArray(categorias)) {
-      const categoriasData = categorias.map((categoriaId: number) => ({
-        transacaoId: novaTransacao.id,
-        categoriaId,
-      }));
+    console.log("Transação criada:", novaTransacao);
 
-      await prisma.transacaoParaCategoria.createMany({
-        data: categoriasData,
-      });
+    // Associa categorias à transação
+    if (categorias && Array.isArray(categorias)) {
+      await Promise.all(
+        categorias.map((categoriaId: number) =>
+          prisma.transacaoParaCategoria.create({
+            data: {
+              transacaoId: novaTransacao.id, // Referência correta
+              categoriaId: categoriaId,
+            },
+          })
+        )
+      );
     }
 
     // Ajusta o saldo da conta
-    const ajusteSaldo = tipoDeTransacao === "ENTRADA" ? valor : -valor;
+    const ajusteSaldo = tipoDeTransacao === "ENTRADA" ? Number(valor) : -Number(valor);
     await ajustarSaldoConta(contaId, ajusteSaldo);
 
     return NextResponse.json(novaTransacao, { status: 200 });
@@ -282,6 +271,7 @@ export async function POST(request: Request) {
     );
   }
 }
+
 
 
 /**
@@ -335,18 +325,18 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    // Obtém o ID da transação dos parâmetros da URL
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
-    if (!id) {
+    // Verifica se o ID foi fornecido e é válido
+    if (!id || isNaN(Number(id))) {
       return NextResponse.json(
-        { error: "ID da transação não fornecido" },
+        { error: "ID da transação não fornecido ou inválido" },
         { status: 400 }
       );
     }
 
-    // Obtém os dados da requisição
+    // Validação dos dados para atualização
     const dados = await request.json();
     if (!validarDadosTransacao(dados, true)) {
       return NextResponse.json(
@@ -355,10 +345,10 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Busca a transação existente
+    // Busca a transação existente para validação e ajustes
     const transacaoAntiga = await prisma.transacao.findUnique({
       where: { id: Number(id) },
-      include: { categorias: true }, // Inclui categorias associadas
+      include: { transacoes_para_categorias: true },
     });
 
     if (!transacaoAntiga) {
@@ -368,15 +358,16 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Ajuste do saldo da conta (remove o saldo antigo e aplica o novo)
+    // Calculando o ajuste no saldo
     const ajusteSaldoAntigo =
       transacaoAntiga.tipoDeTransacao === "ENTRADA"
         ? -transacaoAntiga.valor
         : transacaoAntiga.valor;
+
     const ajusteSaldoNovo =
       dados.tipoDeTransacao === "ENTRADA" ? dados.valor : -dados.valor;
 
-    // Verifica se o saldo é suficiente caso o tipo seja SAÍDA
+    // Verificando saldo suficiente para a transação
     if (
       dados.tipoDeTransacao === "SAIDA" &&
       !(await verificarSaldoConta(transacaoAntiga.contaId, ajusteSaldoNovo))
@@ -387,7 +378,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Atualiza os dados da transação
+    // Atualiza a transação
     const transacaoAtualizada = await prisma.transacao.update({
       where: { id: Number(id) },
       data: {
@@ -398,18 +389,21 @@ export async function PUT(request: Request) {
       },
     });
 
+    // Atualizando categorias associadas
     if (dados.categorias && Array.isArray(dados.categorias)) {
-      const categoriasData = dados.categorias.map((categoriaId: number) => ({
-        transacaoId: dados.novaTransacao.id,
-        categoriaId,
-      }));
-    
+      await prisma.transacaoParaCategoria.deleteMany({
+        where: { transacaoId: transacaoAtualizada.id },
+      });
+
       await prisma.transacaoParaCategoria.createMany({
-        data: categoriasData,
+        data: dados.categorias.map((categoriaId: number) => ({
+          transacaoId: transacaoAtualizada.id,
+          categoriaId,
+        })),
       });
     }
 
-    // Ajusta o saldo da conta
+    // Ajustando o saldo da conta após a atualização
     await ajustarSaldoConta(
       transacaoAntiga.contaId,
       ajusteSaldoAntigo + ajusteSaldoNovo
@@ -425,10 +419,10 @@ export async function PUT(request: Request) {
   }
 }
 
-// Exclusão de uma transação
+
 /**
  * @swagger
- * /api/transacoes:
+ * /api/transacoes?id={id}:
  *   delete:
  *     summary: Remove uma transação
  *     tags: [Transações]
@@ -455,63 +449,53 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
-    // Verifica se o ID é válido
+    // Verifica se o ID foi fornecido e é válido
     if (!id || isNaN(Number(id))) {
       return NextResponse.json(
-        { error: "ID da transação inválido ou não fornecido" },
+        { error: "ID inválido ou não fornecido" },
         { status: 400 }
       );
     }
 
     const transacaoId = Number(id);
 
-    // Busca a transação e suas categorias relacionadas
-    const transacao = await prisma.transacao.findUnique({
-      where: { id: transacaoId },
-      include: {
-        categorias: true, // Inclui as categorias relacionadas
-      },
+    // Inicia uma transação para garantir a integridade dos dados
+    const transaction = await prisma.$transaction(async (prisma) => {
+      // Remover as associações da transação
+      await prisma.transacaoParaCategoria.deleteMany({
+        where: { transacaoId },
+      });
+
+      // Busca a transação para ajustar o saldo
+      const transacao = await prisma.transacao.findUnique({
+        where: { id: transacaoId },
+        include: { conta: true },
+      });
+
+      if (!transacao) {
+        throw new Error("Transação não encontrada");
+      }
+
+      // Ajuste do saldo da conta
+      const ajusteSaldo =
+        transacao.tipoDeTransacao === "ENTRADA"
+          ? -transacao.valor
+          : transacao.valor;
+
+      // Exclui a transação
+      await prisma.transacao.delete({
+        where: { id: transacaoId },
+      });
+
+      // Ajusta o saldo da conta após a exclusão
+      await ajustarSaldoConta(transacao.contaId, Number(ajusteSaldo));
     });
 
-    // Verifica se a transação existe
-    if (!transacao) {
-      return NextResponse.json(
-        { error: "Transação não encontrada" },
-        { status: 404 }
-      );
-    }
-
-    // Calcula o ajuste no saldo com base no tipo de transação
-    const ajusteSaldo =
-      transacao.tipoDeTransacao === "ENTRADA"
-        ? -Number(transacao.valor)
-        : Number(transacao.valor);
-
-    // Remove categorias associadas na tabela intermediária
-    await prisma.transacaoParaCategoria.deleteMany({
-      where: { transacaoId },
-    });
-
-    // Remove a transação
-    await prisma.transacao.delete({
-      where: { id: transacaoId },
-    });
-
-    // Ajusta o saldo da conta
-    await prisma.conta.update({
-      where: { id: transacao.contaId },
-      data: { saldo: { increment: ajusteSaldo } },
-    });
-
-    // Retorna uma mensagem de sucesso
-    return NextResponse.json(
-      { message: "Transação removida com sucesso" },
-      { status: 200 }
-    );
+    return NextResponse.json({ message: "Transação removida com sucesso" }, { status: 200 });
   } catch (error) {
-    console.error("Erro ao remover transação:", error);
+    console.error("Erro ao excluir transação:", error);
     return NextResponse.json(
-      { error: "Erro ao remover transação" },
+      { error: "Erro interno ao excluir transação" },
       { status: 500 }
     );
   }
