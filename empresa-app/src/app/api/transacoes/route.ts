@@ -459,22 +459,26 @@ export async function DELETE(request: Request) {
 
     const transacaoId = Number(id);
 
+    // Busca a transação para garantir que ela exista antes de tentar excluir
+    const transacao = await prisma.transacao.findUnique({
+      where: { id: transacaoId },
+      include: { conta: true },
+    });
+
+    if (!transacao) {
+      // Se a transação não for encontrada, retorna um erro 404
+      return NextResponse.json(
+        { error: "Transação não encontrada" },
+        { status: 404 }
+      );
+    }
+
     // Inicia uma transação para garantir a integridade dos dados
     const transaction = await prisma.$transaction(async (prisma) => {
       // Remover as associações da transação
       await prisma.transacaoParaCategoria.deleteMany({
         where: { transacaoId },
       });
-
-      // Busca a transação para ajustar o saldo
-      const transacao = await prisma.transacao.findUnique({
-        where: { id: transacaoId },
-        include: { conta: true },
-      });
-
-      if (!transacao) {
-        throw new Error("Transação não encontrada");
-      }
 
       // Ajuste do saldo da conta
       const ajusteSaldo =
@@ -491,6 +495,7 @@ export async function DELETE(request: Request) {
       await ajustarSaldoConta(transacao.contaId, Number(ajusteSaldo));
     });
 
+    // Retorna uma resposta de sucesso
     return NextResponse.json({ message: "Transação removida com sucesso" }, { status: 200 });
   } catch (error) {
     console.error("Erro ao excluir transação:", error);
