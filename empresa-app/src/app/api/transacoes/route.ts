@@ -135,22 +135,39 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
 
-    const filtros: any = {};
+    // Obtém os parâmetros da URL
     const tipoDeTransacao = searchParams.get("tipoDeTransacao");
     const conta_id = searchParams.get("conta_id");
 
+    // Cria o objeto de filtro
+    const filtros: any = {};
+    
+    // Aplica o filtro de tipoDeTransacao se fornecido
     if (tipoDeTransacao) {
-      filtros.tipoDeTransacao = tipoDeTransacao;
+      if (["ENTRADA", "SAIDA"].includes(tipoDeTransacao)) {
+        filtros.tipoDeTransacao = tipoDeTransacao;
+      } else {
+        return NextResponse.json(
+          { error: "Tipo de transação inválido. Use 'ENTRADA' ou 'SAIDA'." },
+          { status: 400 }
+        );
+      }
     }
 
+    // Aplica o filtro de conta_id se fornecido e válido
     if (conta_id) {
       const parsedContaId = parseInt(conta_id, 10);
       if (!isNaN(parsedContaId)) {
         filtros.conta_id = parsedContaId;
+      } else {
+        return NextResponse.json(
+          { error: "ID da conta inválido." },
+          { status: 400 }
+        );
       }
     }
 
-    // Consultar transações com categorias
+    // Consulta as transações com os filtros aplicados
     const transacoes = await prisma.transacao.findMany({
       where: filtros,
       include: {
@@ -160,14 +177,15 @@ export async function GET(request: Request) {
           },
         },
       },
-      orderBy: { id: "asc" }, // Ordenação por ID crescente
+      orderBy: { id: "asc" }, // Ordena pela ID crescente
     });
 
+    // Retorna as transações encontradas
     return NextResponse.json(transacoes, { status: 200 });
   } catch (error) {
     console.error("Erro ao buscar transações:", error);
     return NextResponse.json(
-      { error: "Erro ao buscar transações" },
+      { error: "Erro interno ao buscar transações." },
       { status: 500 }
     );
   }
@@ -279,8 +297,8 @@ export async function POST(request: Request) {
       data: {
         transacao_id: novaTransacao.id,  // Usando o id da transação recém-criada
         usuario_id: conta.usuarioId,     // Id do usuário da conta (assumindo que existe uma relação)
-        operacao: "INSERT",
-        descricao: "Transação realizada",
+        operacao: tipoDeTransacao,
+        descricao: `Transação de ${tipoDeTransacao} no valor de R$ ${valor.toFixed(2)}`,
         data_hora: new Date(),  // Hora atual
       }
     });
