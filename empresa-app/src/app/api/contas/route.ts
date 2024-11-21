@@ -103,11 +103,22 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const usuarioId = searchParams.get("usuarioId");
 
+    // Montar a cláusula where dependendo da presença de usuarioId
     const where = usuarioId ? { usuarioId: Number(usuarioId) } : undefined;
 
-    const contas = await prisma.conta.findMany({ where });
+    // Consultar as contas com a condição where
+    const contas = await prisma.conta.findMany({
+      where,
+    });
 
-    return NextResponse.json(contas, { status: 200 });
+    // Converter o saldo para número e garantir que o formato seja correto
+    const contasComSaldo = contas.map(conta => ({
+      ...conta,
+      saldo: parseFloat(conta.saldo.toString()), // Converte saldo de Decimal para número
+    }));
+
+    // Retornar a resposta com as contas
+    return NextResponse.json(contasComSaldo, { status: 200 });
   } catch (error) {
     console.error("Erro ao buscar contas:", error);
     return NextResponse.json(
