@@ -133,10 +133,19 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { nomeDeUsuario, email, senha, role, verificado, ativo } = await request.json();
+    const {
+      nomeDeUsuario,
+      email,
+      senha,
+      role,
+      verificado,
+      ativo,
+      perfilDeConfiguracao,
+    } = await request.json();
 
     const senhaCriptografada = await bcrypt.hash(senha, 10);
 
+    // Cria o usuário e, ao mesmo tempo, o perfil de configuração
     const novoUsuario = await prisma.usuario.create({
       data: {
         nomeDeUsuario,
@@ -145,11 +154,18 @@ export async function POST(request: Request) {
         role,
         verificado,
         ativo,
+        perfilDeConfiguracao: {
+          create: {
+            notificacoesAtivadas: perfilDeConfiguracao.notificacoesAtivadas,
+            moedaPreferida: perfilDeConfiguracao.moedaPreferida,
+          },
+        },
       },
     });
 
     return NextResponse.json(novoUsuario, { status: 200 });
   } catch (error) {
+    console.error("Erro ao criar usuário:", error);
     return NextResponse.json(
       { error: "Erro ao criar usuário" },
       { status: 500 }

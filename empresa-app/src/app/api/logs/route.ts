@@ -44,7 +44,7 @@ export async function GET(request: Request) {
       skip: offset,
       take: limit,
       orderBy: {
-        dataHora: "desc", // Ordenar do mais recente para o mais antigo
+        data_hora: "desc", // Ordenar do mais recente para o mais antigo
       },
     });
 

@@ -2,42 +2,51 @@ import { NextResponse } from "next/server";
 import prisma from "../../lib/PrismaClient";
 
 // Função para ajustar o saldo de uma conta (para o caso de uma transação ser excluída)
-const ajustarSaldoConta = async (contaId: number, valor: number) => {
+const ajustarSaldoConta = async (conta_id: number, valor: number) => {
   await prisma.conta.update({
-    where: { id: contaId },
+    where: { id: conta_id },
     data: { saldo: { increment: valor } }, // Decrementa ou incrementa o saldo conforme o tipo de transação
   });
 };
 
 // Verificar se o saldo da conta é suficiente para a transação
-const verificarSaldoConta = async (contaId: number, valor: number) => {
-  const conta = await prisma.conta.findUnique({ where: { id: contaId } });
+const verificarSaldoConta = async (conta_id: number, valor: number) => {
+  const conta = await prisma.conta.findUnique({ where: { id: conta_id } });
   if (!conta) return false;
 
   return Number(conta.saldo) + valor >= 0;
 };
 
-// Validação dos dados da transação
-const validarDadosTransacao = (dados: any, isUpdate = false): boolean => {
-  const { contaId, valor, tipoDeTransacao, dataTransacao, descricao } = dados;
+const validarDadosTransacao = async (dados: any, isUpdate = false): Promise<boolean> => {
+  if (!dados) return false;
 
-  if (isUpdate) {
-    return valor !== undefined || dataTransacao !== undefined || descricao !== undefined;
+  const { conta_id, valor, tipoDeTransacao, dataTransacao, descricao } = dados;
+
+  // Verifique se conta_id está presente
+  console.log("conta_id recebido:", conta_id);
+
+  const conta = await prisma.conta.findUnique({ where: { id: conta_id } });
+  console.log("Conta encontrada:", conta);
+
+  if (
+    !conta_id ||  // Verifique se conta_id existe
+    isNaN(Number(conta_id)) || 
+    !valor || 
+    isNaN(Number(valor)) || 
+    !tipoDeTransacao || 
+    !["ENTRADA", "SAIDA"].includes(tipoDeTransacao) || 
+    !dataTransacao || 
+    isNaN(Date.parse(dataTransacao)) || 
+    !descricao
+  ) {
+    return false;
   }
 
-  return (
-    contaId &&
-    typeof contaId === "number" &&
-    valor !== undefined &&
-    typeof valor === "number" &&
-    tipoDeTransacao &&
-    ["ENTRADA", "SAIDA"].includes(tipoDeTransacao) &&
-    dataTransacao &&
-    !isNaN(new Date(dataTransacao).getTime()) &&
-    descricao &&
-    typeof descricao === "string"
-  );
+  if (!isUpdate && !dados.categorias) return false;
+
+  return true;
 };
+
 
 /**
  * @swagger
@@ -63,7 +72,7 @@ const validarDadosTransacao = (dados: any, isUpdate = false): boolean => {
  *         schema:
  *           type: string
  *           enum: [ENTRADA, SAIDA]
- *       - name: contaId
+ *       - name: conta_id
  *         in: query
  *         required: false
  *         description: Filtra as transações por uma conta específica
@@ -83,7 +92,7 @@ const validarDadosTransacao = (dados: any, isUpdate = false): boolean => {
  *                     type: integer
  *                     description: ID da transação
  *                     example: 1
- *                   contaId:
+ *                   conta_id:
  *                     type: integer
  *                     description: ID da conta associada
  *                     example: 3
@@ -128,16 +137,16 @@ export async function GET(request: Request) {
 
     const filtros: any = {};
     const tipoDeTransacao = searchParams.get("tipoDeTransacao");
-    const contaId = searchParams.get("contaId");
+    const conta_id = searchParams.get("conta_id");
 
     if (tipoDeTransacao) {
       filtros.tipoDeTransacao = tipoDeTransacao;
     }
 
-    if (contaId) {
-      const parsedContaId = parseInt(contaId, 10);
+    if (conta_id) {
+      const parsedContaId = parseInt(conta_id, 10);
       if (!isNaN(parsedContaId)) {
-        filtros.contaId = parsedContaId;
+        filtros.conta_id = parsedContaId;
       }
     }
 
@@ -179,7 +188,7 @@ export async function GET(request: Request) {
  *           schema:
  *             type: object
  *             properties:
- *               contaId:
+ *               conta_id:
  *                 type: integer
  *               valor:
  *                 type: number
@@ -205,36 +214,39 @@ export async function GET(request: Request) {
  */
 
 // Função de POST para criar transação
+// Função de POST para criar transação
 export async function POST(request: Request) {
   try {
     const dados = await request.json();
-    console.log("Dados recebidos:", dados);
+    
+    console.log("Dados recebidos:", dados); // Verifique o que está sendo recebido
 
     // Validação inicial dos dados
     if (!validarDadosTransacao(dados)) {
+      console.log("Dados inválidos:", dados); // Adicione esse log
       return NextResponse.json(
         { error: "Dados incompletos para criar transação" },
         { status: 400 }
       );
     }
 
-    const { contaId, valor, tipoDeTransacao, dataTransacao, descricao, categorias } = dados;
+    const { conta_id, valor, tipoDeTransacao, dataTransacao, descricao, categorias } = dados;
 
     // Verifica se a conta existe
-    const conta = await prisma.conta.findUnique({ where: { id: contaId } });
+    const conta = await prisma.conta.findUnique({ where: { id: conta_id } });
     if (!conta) {
       return NextResponse.json({ error: "Conta não encontrada" }, { status: 400 });
     }
 
     // Verifica saldo suficiente para transações do tipo SAÍDA
-    if (tipoDeTransacao === "SAIDA" && !(await verificarSaldoConta(contaId, -valor))) {
+    if (tipoDeTransacao === "SAIDA" && !(await verificarSaldoConta(conta_id, -valor))) {
       return NextResponse.json({ error: "Saldo insuficiente" }, { status: 400 });
     }
 
     // Cria a transação no banco de dados
     const novaTransacao = await prisma.transacao.create({
       data: {
-        contaId,
+        conta_id: conta_id,
         valor,
         dataTransacao: new Date(dataTransacao),
         descricao,
@@ -242,16 +254,16 @@ export async function POST(request: Request) {
       },
     });
 
-    console.log("Transação criada:", novaTransacao);
+    console.log("Transação criada:", novaTransacao); // Log do sucesso
 
     // Associa categorias à transação
     if (categorias && Array.isArray(categorias)) {
       await Promise.all(
-        categorias.map((categoriaId: number) =>
+        categorias.map((categoria_id: number) =>
           prisma.transacaoParaCategoria.create({
             data: {
-              transacaoId: novaTransacao.id, // Referência correta
-              categoriaId: categoriaId,
+              transacao_id: novaTransacao.id, // Referência correta
+              categoria_id: categoria_id,
             },
           })
         )
@@ -260,7 +272,18 @@ export async function POST(request: Request) {
 
     // Ajusta o saldo da conta
     const ajusteSaldo = tipoDeTransacao === "ENTRADA" ? Number(valor) : -Number(valor);
-    await ajustarSaldoConta(contaId, ajusteSaldo);
+    await ajustarSaldoConta(conta_id, ajusteSaldo);
+
+    // Adicionando o log da transação manualmente após criar a transação
+    await prisma.transacaoLog.create({
+      data: {
+        transacao_id: novaTransacao.id,  // Usando o id da transação recém-criada
+        usuario_id: conta.usuarioId,     // Id do usuário da conta (assumindo que existe uma relação)
+        operacao: "INSERT",
+        descricao: "Transação realizada",
+        data_hora: new Date(),  // Hora atual
+      }
+    });
 
     return NextResponse.json(novaTransacao, { status: 200 });
   } catch (error) {
@@ -271,8 +294,6 @@ export async function POST(request: Request) {
     );
   }
 }
-
-
 
 /**
  * @swagger
@@ -370,7 +391,7 @@ export async function PUT(request: Request) {
     // Verificando saldo suficiente para a transação
     if (
       dados.tipoDeTransacao === "SAIDA" &&
-      !(await verificarSaldoConta(transacaoAntiga.contaId, ajusteSaldoNovo))
+      !(await verificarSaldoConta(transacaoAntiga.conta_id, ajusteSaldoNovo))
     ) {
       return NextResponse.json(
         { error: "Saldo insuficiente para a transação" },
@@ -392,20 +413,20 @@ export async function PUT(request: Request) {
     // Atualizando categorias associadas
     if (dados.categorias && Array.isArray(dados.categorias)) {
       await prisma.transacaoParaCategoria.deleteMany({
-        where: { transacaoId: transacaoAtualizada.id },
+        where: { transacao_id: transacaoAtualizada.id },
       });
 
       await prisma.transacaoParaCategoria.createMany({
-        data: dados.categorias.map((categoriaId: number) => ({
-          transacaoId: transacaoAtualizada.id,
-          categoriaId,
+        data: dados.categorias.map((categoria_id: number) => ({
+          transacao_id: transacaoAtualizada.id,
+          categoria_id,
         })),
       });
     }
 
     // Ajustando o saldo da conta após a atualização
     await ajustarSaldoConta(
-      transacaoAntiga.contaId,
+      transacaoAntiga.conta_id,
       ajusteSaldoAntigo + ajusteSaldoNovo
     );
 
@@ -457,11 +478,11 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const transacaoId = Number(id);
+    const transacao_id = Number(id);
 
     // Busca a transação para garantir que ela exista antes de tentar excluir
     const transacao = await prisma.transacao.findUnique({
-      where: { id: transacaoId },
+      where: { id: transacao_id },
       include: { conta: true },
     });
 
@@ -477,7 +498,7 @@ export async function DELETE(request: Request) {
     const transaction = await prisma.$transaction(async (prisma) => {
       // Remover as associações da transação
       await prisma.transacaoParaCategoria.deleteMany({
-        where: { transacaoId },
+        where: { transacao_id },
       });
 
       // Ajuste do saldo da conta
@@ -488,11 +509,11 @@ export async function DELETE(request: Request) {
 
       // Exclui a transação
       await prisma.transacao.delete({
-        where: { id: transacaoId },
+        where: { id: transacao_id },
       });
 
       // Ajusta o saldo da conta após a exclusão
-      await ajustarSaldoConta(transacao.contaId, Number(ajusteSaldo));
+      await ajustarSaldoConta(transacao.conta_id, Number(ajusteSaldo));
     });
 
     // Retorna uma resposta de sucesso

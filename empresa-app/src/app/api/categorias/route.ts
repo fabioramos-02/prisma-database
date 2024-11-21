@@ -22,7 +22,7 @@ import prisma from "../../lib/PrismaClient";
  *           schema:
  *             type: object
  *             properties:
- *               nomeDaCategoria:
+ *               nome_da_categoria:
  *                 type: string
  *                 description: Nome da categoria de transação
  *                 example: "Alimentação"
@@ -36,9 +36,9 @@ import prisma from "../../lib/PrismaClient";
  */
 export async function POST(request: Request) {
   try {
-    const { nomeDaCategoria } = await request.json();
+    const { nome_da_categoria } = await request.json();
 
-    if (!nomeDaCategoria) {
+    if (!nome_da_categoria) {
       return NextResponse.json(
         { error: "Nome da categoria é obrigatório" },
         { status: 400 }
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     }
 
     const categoriaExistente = await prisma.categoriaDeTransacao.findUnique({
-      where: { nomeDaCategoria },
+      where: { nome_da_categoria: nome_da_categoria },
     });
 
     if (categoriaExistente) {
@@ -58,8 +58,8 @@ export async function POST(request: Request) {
 
     const novaCategoria = await prisma.categoriaDeTransacao.create({
       data: {
-        nomeDaCategoria,
-        criadoEm: new Date(),
+        nome_da_categoria,
+        criado_em: new Date(),
       },
     });
 
@@ -118,7 +118,7 @@ export async function GET() {
  *           schema:
  *             type: object
  *             properties:
- *               nomeDaCategoria:
+ *               nome_da_categoria:
  *                 type: string
  *                 description: Nome da categoria
  *                 example: "Renda"
@@ -144,10 +144,10 @@ export async function PUT(request: Request) {
   }
 
   try {
-    const { nomeDaCategoria } = await request.json();
+    const { nome_da_categoria } = await request.json();
 
     const categoriaExistente = await prisma.categoriaDeTransacao.findUnique({
-      where: { nomeDaCategoria },
+      where: { nome_da_categoria },
     });
 
     if (categoriaExistente && categoriaExistente.id !== Number(id)) {
@@ -159,7 +159,7 @@ export async function PUT(request: Request) {
 
     const categoriaAtualizada = await prisma.categoriaDeTransacao.update({
       where: { id: Number(id) },
-      data: { nomeDaCategoria },
+      data: { nome_da_categoria },
     });
 
     return NextResponse.json(categoriaAtualizada, { status: 200 });
