@@ -35,6 +35,7 @@ Este projeto visa criar um sistema de controle financeiro utilizando Next.js par
 ## Estrutura do Projeto
 
 - **Next.js**: Framework para frontend em React.
+- **Node**: Back end da aplicação
 - **Prisma**: ORM para interagir com o banco de dados.
 - **PostgreSQL**: Banco de dados relacional.
 
@@ -63,7 +64,7 @@ Este projeto visa criar um sistema de controle financeiro utilizando Next.js par
 
    - Abra o arquivo `.env` e configure a URL de conexão com o banco de dados. Exemplo:
      ```bash
-     DATABASE_URL="postgresql://usuario:senha@localhost:5432/nome_do_banco"
+     DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres?schema=public"
      ```
 
 4. **Criar Modelos e Migrações**
