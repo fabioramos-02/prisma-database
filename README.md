@@ -110,41 +110,42 @@ Este projeto visa criar um sistema de controle financeiro utilizando Next.js par
 - Comando para criar a trigger e a tabela de logs
 
 ```
--- Criação da tabela de logs
-CREATE TABLE IF NOT EXISTS transacao_logs (
-   id SERIAL PRIMARY KEY,
-   transacao_id INTEGER NOT NULL,
-   usuario_id INTEGER,
-   operacao VARCHAR(10) NOT NULL,
-   data_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-   descricao TEXT,
-   CONSTRAINT fk_transacao FOREIGN KEY (transacao_id) REFERENCES transacoes (id) ON DELETE CASCADE
-);
+
 
 -- Função para registrar logs de operações em transacoes
-CREATE OR REPLACE FUNCTION log_transacao_operacao()
+CREATE OR REPLACE FUNCTION log_transacao()
 RETURNS TRIGGER AS $$
 BEGIN
-   IF (TG_OP = 'DELETE') THEN
-       -- Log para exclusão
-       INSERT INTO transacao_logs (transacao_id, usuario_id, operacao, descricao)
-       VALUES (OLD.id, OLD.contaId, 'DELETE', OLD.descricao);
-       RETURN OLD;
-   ELSIF (TG_OP = 'UPDATE') THEN
-       -- Log para atualização
-       INSERT INTO transacao_logs (transacao_id, usuario_id, operacao, descricao)
-       VALUES (OLD.id, OLD.contaId, 'UPDATE', OLD.descricao);
-       RETURN NEW;
-   END IF;
+    -- Captura a operação realizada na tabela `transacoes`
+    CASE TG_OP
+        WHEN 'INSERT' THEN
+            INSERT INTO transacao_log (transacao_id, usuario_id, operacao, descricao, data_hora)
+            VALUES (NEW.id, NEW.usuario_id, 'INSERT', NEW.descricao, NOW());
+            RETURN NEW;
+
+        WHEN 'UPDATE' THEN
+            INSERT INTO transacao_log (transacao_id, usuario_id, operacao, descricao, data_hora)
+            VALUES (NEW.id, NEW.usuario_id, 'UPDATE', CONCAT('Atualizado para: ', NEW.descricao), NOW());
+            RETURN NEW;
+
+        WHEN 'DELETE' THEN
+            INSERT INTO transacao_log (transacao_id, usuario_id, operacao, descricao, data_hora)
+            VALUES (OLD.id, OLD.usuario_id, 'DELETE', OLD.descricao, NOW());
+            RETURN OLD;
+
+        ELSE
+            -- Caso nenhuma operação válida seja capturada
+            RETURN NULL;
+    END CASE;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger para chamar a função log_transacao_operacao em eventos de DELETE e UPDATE na tabela transacoes
-CREATE TRIGGER transacao_log_trigger
-AFTER DELETE OR UPDATE
+CREATE OR REPLACE TRIGGER transacao_log_trigger
+AFTER INSERT OR UPDATE OR DELETE
 ON transacoes
 FOR EACH ROW
-EXECUTE FUNCTION log_transacao_operacao();
+EXECUTE FUNCTION log_transacao();
 
 ```
 
