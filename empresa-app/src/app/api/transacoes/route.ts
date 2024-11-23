@@ -292,16 +292,16 @@ export async function POST(request: Request) {
     const ajusteSaldo = tipoDeTransacao === "ENTRADA" ? Number(valor) : -Number(valor);
     await ajustarSaldoConta(conta_id, ajusteSaldo);
 
-    // Adicionando o log da transação manualmente após criar a transação
-    await prisma.transacaoLog.create({
-      data: {
-        transacao_id: novaTransacao.id,  // Usando o id da transação recém-criada
-        usuario_id: conta.usuarioId,     // Id do usuário da conta (assumindo que existe uma relação)
-        operacao: tipoDeTransacao,
-        descricao: `Transação de ${tipoDeTransacao} no valor de R$ ${valor.toFixed(2)}`,
-        data_hora: new Date(),  // Hora atual
-      }
-    });
+    // // Adicionando o log da transação manualmente após criar a transação
+    // await prisma.transacaoLog.create({
+    //   data: {
+    //     transacao_id: novaTransacao.id,  // Usando o id da transação recém-criada
+    //     usuario_id: conta.usuarioId,     // Id do usuário da conta (assumindo que existe uma relação)
+    //     operacao: tipoDeTransacao,
+    //     descricao: `Transação de ${tipoDeTransacao} no valor de R$ ${valor.toFixed(2)}`,
+    //     data_hora: new Date(),  // Hora atual
+    //   }
+    // });
 
     return NextResponse.json(novaTransacao, { status: 200 });
   } catch (error) {
